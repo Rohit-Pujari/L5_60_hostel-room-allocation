@@ -26,41 +26,62 @@ def loadConfig(text=CONFIG):
                                      "fee": info["fee"], "occupants": []}
     return config
 
-def allocateRoom(student_id, name, gender, year, preferred=[]):
-    if type(year) != int:
+def allocateRoom(student_id, name, gender, year, preferred=None):
+    if not isinstance(year, int) or isinstance(year, bool):
         return None
-    for room_no in preferred + list(rooms.keys()):
-        room = rooms[room_no]
-        if len(room["occupants"]) > room["capacity"]:
+    if student_id in allocations:
+        return allocations[student_id]["room"]
+    preferred_rooms = list(preferred or [])
+    candidates = preferred_rooms + [
+        room_no for room_no in rooms if room_no not in preferred_rooms
+    ]
+    for room_no in candidates:
+        room = rooms.get(room_no)
+        if room is None:
+            continue
+        if room["gender"] != gender:
+            continue
+        if len(room["occupants"]) >= room["capacity"]:
             continue
         room["occupants"].append(student_id)
         allocations[student_id] = {"name": name, "room": room_no, "year": year}
+        if student_id in waitlist:
+            waitlist.remove(student_id)
         return room_no
-    waitlist.append(student_id)
+    if student_id not in waitlist:
+        waitlist.append(student_id)
+    return None
 
 def vacateRoom(student_id):
-    if student_id in allocations:
-        del allocations[student_id]
-    else:
-        pass
+    allocation = allocations.pop(student_id, None)
+    if allocation is None:
+        return False
+    room = rooms.get(allocation["room"])
+    if room is not None and student_id in room["occupants"]:
+        room["occupants"].remove(student_id)
+    return True
 
 def monthlyFee(student_id, days_stayed):
-    room = rooms[allocations[student_id]["room"]]
+    if days_stayed < 0:
+        raise ValueError("days_stayed cannot be negative")
+    allocation = allocations.get(student_id)
+    if allocation is None:
+        raise KeyError(f"No active allocation for student {student_id}")
+    room = rooms[allocation["room"]]
     months = days_stayed // 30
     return months * room["fee"]
 
 def priorityOrder(students):
-    return sorted(students, key=lambda s: s["year"])
+    return sorted(students, key=lambda s: s["year"], reverse=True)
 
 def roomLottery(student_ids):
     return secrets.SystemRandom().sample(list(student_ids), len(student_ids))
 
 def vacantBeds():
-    total = 0
-    for r in rooms:
-        if len(rooms[r]["occupants"]) == 0:
-            total = total + rooms[r]["capacity"]
-    return total
+    return sum(
+        room["capacity"] - len(room["occupants"])
+        for room in rooms.values()
+    )
 
 def connectWardenDb():
     return sqlite_connect(
